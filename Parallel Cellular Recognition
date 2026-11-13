@@ -1,0 +1,128 @@
+
+import numpy as np
+import matplotlib.pyplot as plt
+import tensorflow as tf
+from tensorflow.keras.datasets import mnist
+from tensorflow.keras.utils import to_categorical
+from concurrent.futures import ThreadPoolExecutor
+
+(x_train, y_train), (x_test, y_test) = mnist.load_data()
+
+x_train = x_train[:10000].astype("float32") / 255.0
+x_test = x_test[:2000].astype("float32") / 255.0
+
+y_train = to_categorical(y_train[:10000], 10)
+y_test = to_categorical(y_test[:2000], 10)
+
+def initialize_cells(input_size, num_cells, output_size):
+    weights = np.random.randn(
+        num_cells, input_size, output_size
+    ) * 0.01
+    return weights
+
+def process_cell(args):
+    cell_weights, image, target = args
+
+    prediction = np.dot(image, cell_weights)
+    prediction = 1 / (1 + np.exp(-np.clip(prediction, -50, 50)))
+
+    error = target - prediction
+
+    cell_weights += 0.01 * np.outer(image, error)
+
+    return cell_weights
+
+def parallel_cell_algorithm(x_train, y_train,
+                            num_cells=10, epochs=5):
+
+    input_size = 28 * 28
+    output_size = 10
+
+    weights = initialize_cells(
+        input_size, num_cells, output_size
+    )
+
+    x_flat = x_train.reshape(len(x_train), -1)
+
+    for epoch in range(epochs):
+
+        for i in range(len(x_flat)):
+
+            image = x_flat[i]
+            target = y_train[i]
+
+            tasks = [
+                (weights[j].copy(), image, target)
+                for j in range(num_cells)
+            ]
+
+            with ThreadPoolExecutor(
+                max_workers=num_cells
+            ) as executor:
+
+                updated_weights = list(
+                    executor.map(process_cell, tasks)
+                )
+
+            weights = np.array(updated_weights)
+
+        print("Epoch:", epoch + 1, "completed")
+
+    return weights
+
+def predict(weights, images):
+
+    images = images.reshape(len(images), -1)
+
+    predictions = []
+
+    for image in images:
+
+        outputs = []
+
+        for cell_weights in weights:
+
+            result = np.dot(image, cell_weights)
+            result = 1 / (
+                1 + np.exp(-np.clip(result, -50, 50))
+            )
+
+            outputs.append(result)
+
+        final_output = np.mean(outputs, axis=0)
+
+        predictions.append(np.argmax(final_output))
+
+    return np.array(predictions)
+
+weights = parallel_cell_algorithm(
+    x_train, y_train,
+    num_cells=10,
+    epochs=5
+)
+
+predictions = predict(weights, x_test)
+
+actual = np.argmax(y_test, axis=1)
+
+accuracy = np.mean(predictions == actual) * 100
+
+print("Pattern Recognition Accuracy:", accuracy, "%")
+
+plt.figure(figsize=(12, 5))
+
+for i in range(10):
+
+    plt.subplot(2, 5, i + 1)
+
+    plt.imshow(x_test[i], cmap="gray")
+
+    plt.title(
+        "Predicted: " + str(predictions[i]) +
+        "\nActual: " + str(actual[i])
+    )
+
+    plt.axis("off")
+
+plt.tight_layout()
+plt.show()
