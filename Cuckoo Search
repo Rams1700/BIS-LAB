@@ -1,0 +1,158 @@
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+import math
+from google.colab import files
+
+uploaded = files.upload()
+image_path = next(iter(uploaded))
+
+image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+
+if image is None:
+    raise ValueError("Unable to load image")
+
+plt.figure(figsize=(6, 6))
+plt.imshow(image, cmap='gray')
+plt.title("Original Grayscale Image")
+plt.axis("off")
+plt.show()
+
+
+def fitness(threshold, image):
+    threshold = int(np.clip(threshold, 0, 255))
+
+    hist = cv2.calcHist([image], [0], None, [256], [0, 256]).flatten()
+    hist = hist / hist.sum()
+
+    w0 = np.sum(hist[:threshold + 1])
+    w1 = 1 - w0
+
+    if w0 == 0 or w1 == 0:
+        return 0
+
+    mean0 = np.sum(np.arange(threshold + 1) * hist[:threshold + 1]) / w0
+    mean1 = np.sum(np.arange(threshold + 1, 256) * hist[threshold + 1:]) / w1
+    global_mean = np.sum(np.arange(256) * hist)
+
+    variance = (
+        w0 * (mean0 - global_mean) ** 2 +
+        w1 * (mean1 - global_mean) ** 2
+    )
+
+    return variance
+
+
+def levy_flight(beta=1.5):
+    sigma = (
+        math.gamma(1 + beta) * np.sin(np.pi * beta / 2) /
+        (math.gamma((1 + beta) / 2) * beta * 2 ** ((beta - 1) / 2))
+    ) ** (1 / beta)
+
+    u = np.random.normal(0, sigma)
+    v = np.random.normal(0, 1)
+
+    return u / abs(v) ** (1 / beta)
+
+
+def cuckoo_search(image, n=20, iterations=100, pa=0.25):
+    nests = np.random.uniform(0, 255, n)
+
+    fitness_values = np.array([fitness(x, image) for x in nests])
+
+    best_index = np.argmax(fitness_values)
+    best_nest = nests[best_index]
+    best_fitness = fitness_values[best_index]
+
+    convergence = []
+
+    for iteration in range(iterations):
+
+        for i in range(n):
+            step = levy_flight()
+
+            new_nest = nests[i] + 0.01 * step * (nests[i] - best_nest)
+            new_nest = np.clip(new_nest, 0, 255)
+
+            new_fitness = fitness(new_nest, image)
+
+            if new_fitness > fitness_values[i]:
+                nests[i] = new_nest
+                fitness_values[i] = new_fitness
+
+        abandon = np.random.rand(n) < pa
+
+        for i in range(n):
+            if abandon[i]:
+                nests[i] = np.random.uniform(0, 255)
+                fitness_values[i] = fitness(nests[i], image)
+
+        best_index = np.argmax(fitness_values)
+
+        if fitness_values[best_index] > best_fitness:
+            best_fitness = fitness_values[best_index]
+            best_nest = nests[best_index]
+
+        convergence.append(best_fitness)
+
+        print("Iteration:", iteration + 1,
+              "Best Threshold:", int(best_nest))
+
+    return int(best_nest), convergence
+
+
+optimal_threshold, convergence = cuckoo_search(
+    image,
+    n=20,
+    iterations=100,
+    pa=0.25
+)
+
+print("\nOptimal Threshold:", optimal_threshold)
+
+
+_, segmented_image = cv2.threshold(
+    image,
+    optimal_threshold,
+    255,
+    cv2.THRESH_BINARY
+)
+
+
+plt.figure(figsize=(15, 5))
+
+plt.subplot(1, 3, 1)
+plt.imshow(image, cmap='gray')
+plt.title("Original Image")
+plt.axis("off")
+
+plt.subplot(1, 3, 2)
+plt.imshow(segmented_image, cmap='gray')
+plt.title("CSA Segmented Image")
+plt.axis("off")
+
+plt.subplot(1, 3, 3)
+plt.hist(image.ravel(), bins=256, range=(0, 256))
+plt.axvline(optimal_threshold, color='red', linestyle='--',
+            label='Optimal Threshold')
+plt.title("Image Histogram")
+plt.xlabel("Pixel Intensity")
+plt.ylabel("Frequency")
+plt.legend()
+
+plt.tight_layout()
+plt.show()
+
+
+plt.figure(figsize=(8, 5))
+plt.plot(convergence, color='blue')
+plt.xlabel("Iterations")
+plt.ylabel("Best Fitness Value")
+plt.title("Cuckoo Search Convergence Curve")
+plt.grid(True)
+plt.show()
+
+
+cv2.imwrite("CSA_Segmented_Image.png", segmented_image)
+
+files.download("CSA_Segmented_Image.png")
