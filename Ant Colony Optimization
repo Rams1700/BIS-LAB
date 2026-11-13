@@ -1,0 +1,100 @@
+
+import random
+
+graph = {
+    'A': {'B': 2, 'C': 4},
+    'B': {'A': 2, 'C': 1, 'D': 7},
+    'C': {'A': 4, 'B': 1, 'D': 3},
+    'D': {'B': 7, 'C': 3, 'E': 2},
+    'E': {'D': 2}
+}
+
+NUM_ANTS = 20
+NUM_ITERATIONS = 100
+ALPHA = 1.0
+BETA = 2.0
+EVAPORATION = 0.5
+Q = 100
+
+def ant_colony_optimization(graph, source, destination):
+    pheromone = {}
+
+    for node in graph:
+        for neighbor in graph[node]:
+            pheromone[(node, neighbor)] = 1.0
+
+    best_path = None
+    best_distance = float('inf')
+
+    for iteration in range(NUM_ITERATIONS):
+        all_paths = []
+
+        for ant in range(NUM_ANTS):
+            current = source
+            path = [current]
+            visited = {current}
+            distance = 0
+
+            while current != destination:
+                candidates = [
+                    neighbor for neighbor in graph[current]
+                    if neighbor not in visited
+                ]
+
+                if not candidates:
+                    break
+
+                weights = []
+
+                for neighbor in candidates:
+                    tau = pheromone[(current, neighbor)] ** ALPHA
+                    eta = (1.0 / graph[current][neighbor]) ** BETA
+                    weights.append(tau * eta)
+
+                total = sum(weights)
+                probabilities = [w / total for w in weights]
+
+                next_node = random.choices(
+                    candidates, weights=probabilities, k=1
+                )[0]
+
+                distance += graph[current][next_node]
+                current = next_node
+                path.append(current)
+                visited.add(current)
+
+            if current == destination:
+                all_paths.append((path, distance))
+
+                if distance < best_distance:
+                    best_distance = distance
+                    best_path = path
+
+        for edge in pheromone:
+            pheromone[edge] *= (1 - EVAPORATION)
+
+        for path, distance in all_paths:
+            deposit = Q / distance
+
+            for i in range(len(path) - 1):
+                edge = (path[i], path[i + 1])
+                reverse_edge = (path[i + 1], path[i])
+
+                pheromone[edge] += deposit
+                pheromone[reverse_edge] += deposit
+
+    return best_path, best_distance
+
+
+source = 'A'
+destination = 'E'
+
+path, distance = ant_colony_optimization(
+    graph, source, destination
+)
+
+if path:
+    print("Shortest path found:", " -> ".join(path))
+    print("Total distance:", distance)
+else:
+    print("No path found between the given nodes.")
