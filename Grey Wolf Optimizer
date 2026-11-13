@@ -1,0 +1,198 @@
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from sklearn.datasets import load_iris
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+
+np.random.seed(42)
+
+data = load_iris()
+
+X = data.data
+y = data.target
+feature_names = data.feature_names
+
+print("Dataset Shape:", X.shape)
+print("Total Features:", X.shape[1])
+print("Total Samples:", X.shape[0])
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
+)
+
+def fitness_function(position):
+
+    selected = position > 0.5
+
+    if np.sum(selected) == 0:
+        return 1.0
+
+    X_selected = X_train[:, selected]
+
+    model = RandomForestClassifier(
+        n_estimators=30,
+        random_state=42
+    )
+
+    scores = cross_val_score(
+        model, X_selected, y_train,
+        cv=3, scoring='accuracy'
+    )
+
+    accuracy = scores.mean()
+    penalty = np.sum(selected) / X.shape[1]
+
+    return 0.99 * (1 - accuracy) + 0.01 * penalty
+
+
+def GWO(SearchAgents=5, MaxIter=15):
+
+    dim = X.shape[1]
+
+    Positions = np.random.rand(SearchAgents, dim)
+
+    Alpha_pos = np.zeros(dim)
+    Beta_pos = np.zeros(dim)
+    Delta_pos = np.zeros(dim)
+
+    Alpha_score = float("inf")
+    Beta_score = float("inf")
+    Delta_score = float("inf")
+
+    convergence = []
+
+    for t in range(MaxIter):
+
+        for i in range(SearchAgents):
+
+            current_fitness = fitness_function(Positions[i])
+
+            if current_fitness < Alpha_score:
+
+                Delta_score = Beta_score
+                Delta_pos = Beta_pos.copy()
+
+                Beta_score = Alpha_score
+                Beta_pos = Alpha_pos.copy()
+
+                Alpha_score = current_fitness
+                Alpha_pos = Positions[i].copy()
+
+            elif current_fitness < Beta_score:
+
+                Delta_score = Beta_score
+                Delta_pos = Beta_pos.copy()
+
+                Beta_score = current_fitness
+                Beta_pos = Positions[i].copy()
+
+            elif current_fitness < Delta_score:
+
+                Delta_score = current_fitness
+                Delta_pos = Positions[i].copy()
+
+        a = 2 - t * (2 / MaxIter)
+
+        for i in range(SearchAgents):
+
+            for j in range(dim):
+
+                r1, r2 = np.random.rand(), np.random.rand()
+                A1 = 2 * a * r1 - a
+                C1 = 2 * r2
+
+                X1 = Alpha_pos[j] - A1 * abs(
+                    C1 * Alpha_pos[j] - Positions[i, j]
+                )
+
+                r1, r2 = np.random.rand(), np.random.rand()
+                A2 = 2 * a * r1 - a
+                C2 = 2 * r2
+
+                X2 = Beta_pos[j] - A2 * abs(
+                    C2 * Beta_pos[j] - Positions[i, j]
+                )
+
+                r1, r2 = np.random.rand(), np.random.rand()
+                A3 = 2 * a * r1 - a
+                C3 = 2 * r2
+
+                X3 = Delta_pos[j] - A3 * abs(
+                    C3 * Delta_pos[j] - Positions[i, j]
+                )
+
+                Positions[i, j] = np.clip(
+                    (X1 + X2 + X3) / 3, 0, 1
+                )
+
+        convergence.append(Alpha_score)
+
+        print("Iteration:", t + 1,
+              "Best Fitness:", round(Alpha_score, 5))
+
+    selected = Alpha_pos > 0.5
+
+    if not np.any(selected):
+        selected[np.argmax(Alpha_pos)] = True
+
+    return selected, convergence
+
+
+selected_features, convergence = GWO()
+
+print("\nSelected Features:")
+
+for name in np.array(feature_names)[selected_features]:
+    print(name)
+
+print("\nTotal Features:", X.shape[1])
+print("Selected Features:", np.sum(selected_features))
+print("Rejected Features:", X.shape[1] - np.sum(selected_features))
+
+X_train_selected = X_train[:, selected_features]
+X_test_selected = X_test[:, selected_features]
+
+model = RandomForestClassifier(
+    n_estimators=50,
+    random_state=42
+)
+
+model.fit(X_train_selected, y_train)
+
+y_pred = model.predict(X_test_selected)
+
+accuracy = accuracy_score(y_test, y_pred)
+
+print("\nClassification Accuracy:", round(accuracy * 100, 2), "%")
+
+print("\nClassification Report:")
+print(classification_report(y_test, y_pred, target_names=data.target_names))
+
+print("\nConfusion Matrix:")
+print(confusion_matrix(y_test, y_pred))
+
+plt.figure(figsize=(7, 4))
+plt.plot(convergence, marker='o', color='blue')
+plt.xlabel("Iterations")
+plt.ylabel("Best Fitness")
+plt.title("GWO Convergence Curve")
+plt.grid()
+plt.show()
+
+plt.figure(figsize=(7, 4))
+plt.bar(
+    feature_names,
+    selected_features.astype(int),
+    color=['green' if x else 'red' for x in selected_features]
+)
+plt.xticks(rotation=20)
+plt.ylabel("Selection (1 = Selected, 0 = Rejected)")
+plt.title("GWO Feature Selection")
+plt.tight_layout()
+plt.show()
+
+print("\nGWO Feature Selection Completed!")
